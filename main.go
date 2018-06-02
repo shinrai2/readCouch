@@ -77,6 +77,7 @@ func main() {
 			_, err = f2.Read(bytesOfPointNum)
 			check(err)
 			pointNum := binary.LittleEndian.Uint16(bytesOfPointNum)
+			_ = pointNum
 			// fmt.Println("PointNum", pointNum)
 			bytesOfLineNum := make([]byte, 2) // LineNum
 			_, err = f2.Read(bytesOfLineNum)
@@ -97,16 +98,14 @@ func main() {
 			check(err)
 			// fmt.Println("ElapsedTime", bytesOfElapsedTime)
 			/*  */
-			points := make([]couchPoint, pointNum)
+			lines := make([]couchLine, lineNum)
 			side := couchSide{nil, nil, nil, nil}
-			lines := make([]int, lineNum)
-			count := 0
 			for j := 0; j < int(lineNum); j++ {
 				bytesOfStrokePointNum := make([]byte, 2) // StrokePointNum
 				_, err = f2.Read(bytesOfStrokePointNum)
 				check(err)
 				strokePointNum := binary.LittleEndian.Uint16(bytesOfStrokePointNum)
-				lines[j] = int(strokePointNum)
+				pointsOfLine := make([]couchPoint, strokePointNum)
 				// fmt.Println("StrokePointNum", strokePointNum)
 
 				for k := 0; k < int(strokePointNum); k++ {
@@ -119,13 +118,13 @@ func main() {
 					check(err)
 					pointY := binary.LittleEndian.Uint16(bytesOfPointY)
 					point := couchPoint{pointX, pointY}
-					points[count] = point
+					pointsOfLine[k] = point
 					update(&side, &point)
-					count = count + 1
 				}
+				lines[j] = couchLine{pointsOfLine}
 			}
-			img := couchImg{side, points, lines}
-			wd, err := os.Getwd()
+			img := couchImg{side, lines}
+			wd, err := os.Getwd() // get working path
 			check(err)
 			wordCodeInt := int(binary.LittleEndian.Uint16(bytesOfWordCode))
 			outputPath := fmt.Sprintf("%s/output/%d.bmp", wd, wordCodeInt)
@@ -143,9 +142,8 @@ func check(err error) {
 }
 
 type couchImg struct {
-	side   couchSide
-	points []couchPoint
-	lines  []int
+	side  couchSide
+	lines []couchLine
 }
 
 func (img couchImg) write(path string) {
@@ -158,38 +156,81 @@ func (img couchImg) write(path string) {
 	rgba := image.NewRGBA(image.Rect(0, 0, width, height))
 	colorWhite := color.RGBA{255, 255, 255, 255}
 	colorBlack := color.RGBA{0, 0, 0, 255}
-	for y := 0; y < height; y++ {
+	colorRed := color.RGBA{255, 0, 0, 255}
+	for y := 0; y < height; y++ { // full of white color in background
 		for x := 0; x < width; x++ {
 			rgba.Set(x, y, colorWhite)
 		}
 	}
 
-	lineRecord := -1
-	lineNum := 0
-	for z := 0; z < len(img.points); z++ {
-		v := img.points[z]
-		vx := int(v.x)
-		vy := int(v.y)
-		rgba.Set(vx-offsetX, vy-offsetY, colorBlack)
-		if lineNum == 0 { // first point in per line.
-			lineNum = img.lines[lineRecord+1] - 1 // bug fixed
-			lineRecord = lineRecord + 1
-			continue
+	for _, eachLine := range img.lines {
+		if len(eachLine.points) == 1 {
+			// handle one point line
+			break
 		}
-
-		if lineNum != img.lines[lineRecord]-1 { // not first point in line.
-			// vp := img.points[z-1]
-			// vpx := int(vp.x)
-			// vpy := int(vp.y)
-			// drawline(vpx, vpy, vx, vy, func(x, y int) {
-			// 	rgba.Set(x-offsetX, y-offsetY, colorBlack)
-			// })
-			rgba.Set(vx-offsetX, vy-offsetY, colorWhite)
+		for z := 1; z < len(eachLine.points); z++ {
+			prePointOfLine := eachLine.points[z-1]
+			eachPointOfLine := eachLine.points[z]
+			if prePointOfLine.x > eachPointOfLine.x {
+				if prePointOfLine.y > eachPointOfLine.y {
+					drawline(int(prePointOfLine.x), int(prePointOfLine.y), int(eachPointOfLine.x), int(eachPointOfLine.y),
+						func(x, y int) {
+							rgba.Set(x-offsetX, y-offsetY, colorBlack)
+						})
+				} else {
+					drawline(int(eachPointOfLine.x), int(eachPointOfLine.y), int(prePointOfLine.x), int(prePointOfLine.y),
+						func(x, y int) {
+							rgba.Set(x-offsetX, y-offsetY, colorBlack)
+						})
+				}
+			} else {
+				if prePointOfLine.y > eachPointOfLine.y {
+					drawline(int(eachPointOfLine.x), int(eachPointOfLine.y), int(prePointOfLine.x), int(prePointOfLine.y),
+						func(x, y int) {
+							rgba.Set(x-offsetX, y-offsetY, colorBlack)
+						})
+				} else {
+					drawline(int(prePointOfLine.x), int(prePointOfLine.y), int(eachPointOfLine.x), int(eachPointOfLine.y),
+						func(x, y int) {
+							rgba.Set(x-offsetX, y-offsetY, colorBlack)
+						})
+				}
+			}
+			rgba.Set(int(eachPointOfLine.x)-offsetX, int(eachPointOfLine.y)-offsetY, colorRed)
+			rgba.Set(int(prePointOfLine.x)-offsetX, int(prePointOfLine.y)-offsetY, colorRed)
 		}
-		lineNum = lineNum - 1
 	}
+
+	// lineRecord := -1
+	// lineNum := 0
+	// for z := 0; z < len(img.points); z++ {
+	// 	v := img.points[z]
+	// 	vx := int(v.x)
+	// 	vy := int(v.y)
+	// 	rgba.Set(vx-offsetX, vy-offsetY, colorBlack)
+	// 	if lineNum == 0 { // first point in per line.
+	// 		lineNum = img.lines[lineRecord+1] - 1 // bug fixed
+	// 		lineRecord = lineRecord + 1
+	// 		continue
+	// 	}
+
+	// 	if lineNum != img.lines[lineRecord]-1 { // not first point in line.
+	// 		// vp := img.points[z-1]
+	// 		// vpx := int(vp.x)
+	// 		// vpy := int(vp.y)
+	// 		// drawline(vpx, vpy, vx, vy, func(x, y int) {
+	// 		// 	rgba.Set(x-offsetX, y-offsetY, colorBlack)
+	// 		// })
+	// 		rgba.Set(vx-offsetX, vy-offsetY, colorWhite)
+	// 	}
+	// 	lineNum = lineNum - 1
+	// }
 	err = bmp.Encode(fout, rgba)
 	check(err)
+}
+
+type couchLine struct {
+	points []couchPoint
 }
 
 type couchPoint struct {
