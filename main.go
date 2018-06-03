@@ -15,15 +15,18 @@ import (
 	"golang.org/x/text/transform"
 )
 
+const (
+	jumpSTA uint8 = 0x1
+	jumpEND uint8 = 0x2
+)
+
 func main() {
 	filesPath := flag.String("path", "", "the path of files.")
 	filesName := flag.String("name", "", "the name of files.")
 	flag.Parse()
 	if *filesPath == "" || *filesName == "" {
-		fmt.Println("Wrong flag.")
+		fmt.Println("Wrong flag input.")
 	} else {
-		// fmt.Println("Before load file:")
-		// fmt.Println(*filesPath, *filesName)
 		f, err := os.Open(*filesPath + *filesName + ".idx")
 		check(err)
 		f2, err := os.Open(*filesPath + *filesName + ".dat")
@@ -55,7 +58,6 @@ func main() {
 			_, err = f.Read(bytesOfDatOffset)
 			check(err)
 			datOffset := binary.LittleEndian.Uint32(bytesOfDatOffset)
-			// fmt.Println("Sample", i, "sampleState", sampleState, "oswIndex", oswIndex, "idxIndex", idxIndex, "datOffset", datOffset)
 			/* Part of DAT file READING */
 			_, err = f2.Seek(int64(datOffset), os.SEEK_SET)
 			check(err)
@@ -130,7 +132,7 @@ func main() {
 			outputPath := fmt.Sprintf("%s/output/%d.bmp", wd, wordCodeInt)
 			img.write(outputPath)
 			fmt.Println(wordCode, wordCodeInt)
-			break // debug
+			// break // debug
 		}
 	}
 }
@@ -154,15 +156,11 @@ func (img couchImg) write(path string) {
 	offsetX := int((*img.side.minX).x)
 	offsetY := int((*img.side.minY).y)
 	rgba := image.NewRGBA(image.Rect(0, 0, width, height))
-	colorWhite := color.RGBA{255, 255, 255, 255}
-	colorBlack := color.RGBA{0, 0, 0, 255}
-	colorRed := color.RGBA{255, 0, 0, 255}
 	for y := 0; y < height; y++ { // full of white color in background
 		for x := 0; x < width; x++ {
-			rgba.Set(x, y, colorWhite)
+			rgba.Set(x, y, color.White)
 		}
 	}
-
 	for _, eachLine := range img.lines {
 		if len(eachLine.points) == 1 {
 			// handle one point line
@@ -171,60 +169,35 @@ func (img couchImg) write(path string) {
 		for z := 1; z < len(eachLine.points); z++ {
 			prePointOfLine := eachLine.points[z-1]
 			eachPointOfLine := eachLine.points[z]
-			if prePointOfLine.x > eachPointOfLine.x {
-				if prePointOfLine.y > eachPointOfLine.y {
-					drawline(int(prePointOfLine.x), int(prePointOfLine.y), int(eachPointOfLine.x), int(eachPointOfLine.y),
+			dy := int(eachPointOfLine.y) - int(prePointOfLine.y)
+			dx := int(eachPointOfLine.x) - int(prePointOfLine.x)
+			if abs(dy) > abs(dx) { // vertical
+				if dx > 0 {
+					drawlineP(prePointOfLine, eachPointOfLine, jumpEND,
 						func(x, y int) {
-							rgba.Set(x-offsetX, y-offsetY, colorBlack)
+							rgba.Set(x-offsetX, y-offsetY, color.Black)
 						})
 				} else {
-					drawline(int(eachPointOfLine.x), int(eachPointOfLine.y), int(prePointOfLine.x), int(prePointOfLine.y),
+					drawlineP(eachPointOfLine, prePointOfLine, jumpSTA,
 						func(x, y int) {
-							rgba.Set(x-offsetX, y-offsetY, colorBlack)
+							rgba.Set(x-offsetX, y-offsetY, color.Black)
 						})
 				}
-			} else {
-				if prePointOfLine.y > eachPointOfLine.y {
-					drawline(int(eachPointOfLine.x), int(eachPointOfLine.y), int(prePointOfLine.x), int(prePointOfLine.y),
+			} else { // horizontal
+				if dy < 0 {
+					drawlineP(eachPointOfLine, prePointOfLine, jumpSTA,
 						func(x, y int) {
-							rgba.Set(x-offsetX, y-offsetY, colorBlack)
+							rgba.Set(x-offsetX, y-offsetY, color.Black)
 						})
 				} else {
-					drawline(int(prePointOfLine.x), int(prePointOfLine.y), int(eachPointOfLine.x), int(eachPointOfLine.y),
+					drawlineP(prePointOfLine, eachPointOfLine, jumpEND,
 						func(x, y int) {
-							rgba.Set(x-offsetX, y-offsetY, colorBlack)
+							rgba.Set(x-offsetX, y-offsetY, color.Black)
 						})
 				}
 			}
-			rgba.Set(int(eachPointOfLine.x)-offsetX, int(eachPointOfLine.y)-offsetY, colorRed)
-			rgba.Set(int(prePointOfLine.x)-offsetX, int(prePointOfLine.y)-offsetY, colorRed)
 		}
 	}
-
-	// lineRecord := -1
-	// lineNum := 0
-	// for z := 0; z < len(img.points); z++ {
-	// 	v := img.points[z]
-	// 	vx := int(v.x)
-	// 	vy := int(v.y)
-	// 	rgba.Set(vx-offsetX, vy-offsetY, colorBlack)
-	// 	if lineNum == 0 { // first point in per line.
-	// 		lineNum = img.lines[lineRecord+1] - 1 // bug fixed
-	// 		lineRecord = lineRecord + 1
-	// 		continue
-	// 	}
-
-	// 	if lineNum != img.lines[lineRecord]-1 { // not first point in line.
-	// 		// vp := img.points[z-1]
-	// 		// vpx := int(vp.x)
-	// 		// vpy := int(vp.y)
-	// 		// drawline(vpx, vpy, vx, vy, func(x, y int) {
-	// 		// 	rgba.Set(x-offsetX, y-offsetY, colorBlack)
-	// 		// })
-	// 		rgba.Set(vx-offsetX, vy-offsetY, colorWhite)
-	// 	}
-	// 	lineNum = lineNum - 1
-	// }
 	err = bmp.Encode(fout, rgba)
 	check(err)
 }
@@ -256,7 +229,18 @@ func update(side *couchSide, p *couchPoint) {
 	}
 }
 
-func drawline(x0, y0, x1, y1 int, brush func(x, y int)) {
+func drawlineP(p0, p1 couchPoint, jump uint8, brush func(x, y int)) {
+	switch jump {
+	case jumpSTA:
+		drawlineNoStart(int(p0.x), int(p0.y), int(p1.x), int(p1.y), brush)
+	case jumpEND:
+		drawlineNoEnd(int(p0.x), int(p0.y), int(p1.x), int(p1.y), brush)
+	default:
+		return
+	}
+}
+
+func drawlineNoStart(x0, y0, x1, y1 int, brush func(x, y int)) { // no start
 	dx := abs(x1 - x0)
 	dy := abs(y1 - y0)
 	sx, sy := 1, 1
@@ -269,18 +253,47 @@ func drawline(x0, y0, x1, y1 int, brush func(x, y int)) {
 	err := dx - dy
 
 	for {
-		brush(x0, y0)
-		if x0 == x1 && y0 == y1 {
-			return
-		}
 		e2 := err * 2
+		if e2 < dx {
+			err += dx
+			y0 += sy
+		}
 		if e2 > -dy {
 			err -= dy
 			x0 += sx
 		}
+		brush(x0, y0)
+		if x0 == x1 && y0 == y1 {
+			return
+		}
+	}
+}
+
+func drawlineNoEnd(x0, y0, x1, y1 int, brush func(x, y int)) { // no end
+	dx := abs(x1 - x0)
+	dy := abs(y1 - y0)
+	sx, sy := 1, 1
+	if x0 >= x1 {
+		sx = -1
+	}
+	if y0 >= y1 {
+		sy = -1
+	}
+	err := dx - dy
+
+	for {
+		if x0 == x1 && y0 == y1 {
+			return
+		}
+		brush(x0, y0)
+		e2 := err * 2
 		if e2 < dx {
 			err += dx
 			y0 += sy
+		}
+		if e2 > -dy {
+			err -= dy
+			x0 += sx
 		}
 	}
 }
