@@ -28,8 +28,10 @@ func main() {
 		fmt.Println("Wrong flag input.")
 	} else {
 		f, err := os.Open(*filesPath + *filesName + ".idx")
+		defer f.Close()
 		check(err)
 		f2, err := os.Open(*filesPath + *filesName + ".dat")
+		defer f2.Close()
 		check(err)
 		/* Load time. */
 		/* Part of IDX file READING */
@@ -150,6 +152,7 @@ type couchImg struct {
 
 func (img couchImg) write(path string) {
 	fout, err := os.Create(path) // Created after judgment to prevent invalid file generation
+	defer fout.Close()
 	check(err)
 	width := int((*img.side.maxX).x-(*img.side.minX).x) + 1
 	height := int((*img.side.maxY).y-(*img.side.minY).y) + 1
